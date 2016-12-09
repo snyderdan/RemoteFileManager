@@ -6,8 +6,8 @@
  * The first 8 bytes of any message is the binary length of the following message
  * 
  * If the server responds with a status of 'F' then the data portion of the response
- * is an 8 byte binary error code, corresponding to errno.h. If it responds with 'S',
- * then the data is whatever specified below.
+ * is an error code, corresponding to errno.h. If it responds with 'S', then the data 
+ * is whatever specified below.
  * 
  * Open:
  *  Client->Server
@@ -19,7 +19,7 @@
  *  Server->Client
  *  - 1 byte status
  *  - 1 byte separator
- *  - 8 byte binary FD/error condition
+ *  - n byte FD/error condition
  * 
  * Close:
  *  Client->Server
@@ -29,7 +29,7 @@
  *  Server->Client
  *  - 1 byte status
  *  - 1 byte separator
- *  - 8 byte binary FD/error condition
+ *  - n byte FD/error condition
  * 
  * Read:
  *  Client->Server
@@ -61,7 +61,10 @@
 #  define FN_CLOSE 'C'
 #  define FN_WRITE 'W'
 #  define FN_READ  'R'
-#  DEFINE SEP_CHAR '&'
+#  define SEP_CHAR ','
+
+#  define STATUS_SUCCESS 'S'
+#  define STATUS_FAILURE 'F'
 
 #  define INVALID_FILE_MODE -55
 #  define HOST_NOT_FOUND    EHOSTUNREACH  // just in case the test code actually uses HOST_NOT_FOUND instead of unreachable
