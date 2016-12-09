@@ -66,6 +66,8 @@
 #  define STATUS_SUCCESS 'S'
 #  define STATUS_FAILURE 'F'
 
+#  define PORT_NUM 20000
+
 #  define INVALID_FILE_MODE -55
 #  define HOST_NOT_FOUND    EHOSTUNREACH  // just in case the test code actually uses HOST_NOT_FOUND instead of unreachable
 
