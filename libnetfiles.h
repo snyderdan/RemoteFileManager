@@ -76,7 +76,6 @@ ssize_t netread(int fd, void *buf, size_t size);
 ssize_t netwrite(int fd, const void *buf, size_t size);
 int netclose(int fd);
 
-netserverinit(char * hostname); 
-netserverinit(char * hostname, int filemode);
+int netserverinit(char * hostname, int filemode);
 
 #endif
