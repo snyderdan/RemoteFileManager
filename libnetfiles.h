@@ -9,6 +9,15 @@
  * is an error code, corresponding to errno.h. If it responds with 'S', then the data 
  * is whatever specified below.
  * 
+ * On connect:
+ *  Client->Server
+ *  - 1 byte mode 'U'/'E'/'T'
+ *  - 1 byte separator
+ *  Server->Client
+ *  - 1 byte status
+ *  - 1 byte sep
+ *  - n bytes error if any
+ * 
  * Open:
  *  Client->Server
  * 	- 1 byte function 'O'
@@ -57,6 +66,10 @@
 #ifndef __LIBNETFILES_H
 #  define __LIBNETFILES_H
 
+#  define MODE_UNRESTRCT 'R'
+#  define MODE_EXCLUSIVE 'E'
+#  define MODE_TRANSACTN 'T'
+
 #  define FN_OPEN  'O'
 #  define FN_CLOSE 'C'
 #  define FN_WRITE 'W'
@@ -69,7 +82,6 @@
 #  define PORT_NUM 20000
 
 #  define INVALID_FILE_MODE -55
-#  define HOST_NOT_FOUND    EHOSTUNREACH  // just in case the test code actually uses HOST_NOT_FOUND instead of unreachable
 
 int netopen(const char *pathname, int flags);
 ssize_t netread(int fd, void *buf, size_t size);
