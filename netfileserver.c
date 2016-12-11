@@ -18,34 +18,62 @@ void error(char *msg) {
     exit(0);
 }
 
-void sendResponseInt(int fd, char stat, int num) {
+/**
+ * Sends a status character, and integer to a client specified by fd.
+ * Returns 0 on success, or -1 on error, with errno set
+ */
+int sendResponseInt(int fd, char stat, int num) {
 	char msg[20];
 	int len;
 	
 	sprintf(msg, "%c%c%d", stat, SEP_CHAR, num);
 	len = strlen(msg);
-	write(fd, &len, 4);
-	write(fd, msg, len);
+	if (write(fd, &len, 4) == -1) return -1;
+	if (write(fd, msg, len) == -1) return -1;
 }
 
+/**
+ * Sends a status character, and a string message to a client specified by fd.
+ * Returns 0 on success, or -1 on error, with errno set
+ */
 void sendResponse(int fd, char stat, char *resp) {
 	char msg[strlen(resp) + 2];
 	int len;
 	
 	sprintf(msg, "%c%c%s", stat, SEP_CHAR, resp);
 	len = strlen(msg);
-	write(fd, &len, 4);
-	write(fd, msg, len);
+	if (write(fd, &len, 4) == -1) return -1;
+	if (write(fd, msg, len) == -1) return -1;
+}
+
+/**
+ * Receives a message from a client. Returns null on error with errno set, and a 
+ * malloc()'ed character string containing all the data sent from the client. 
+ * Remember to free the character pointer returned from this function.
+ */
+char *getMessage(int fd) {
+	int len, rdlen;
+	
+	if (read(fd, &len, 4) < 4) return NULL;
+	
+	char *msg = malloc(len);
+	if (read(fd, msg, len) < len) {
+		free(msg);
+		return NULL;
+	}
+	
+	return msg;
+	
 }
 
 void *handleClient(void *ptr) {
 	int clientfd = * ((int *) ptr);
-	char inmsg[10];
+	char inmsg[6];
 	
 	// read opening msg from client
-	int rdlen = read(clientfd, inmsg, 10);
+	int rdlen = read(clientfd, inmsg, 6);
 	
-	if (rdlen != 10) {
+	if (rdlen != 6) {
 		sendResponseInt(clientfd, STATUS_FAILURE, INVALID_FILE_MODE);
 		return NULL;
 	} else if (inmsg[8] == MODE_UNRESTRCT) {
