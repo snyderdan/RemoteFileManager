@@ -18,34 +18,66 @@ void error(char *msg) {
     exit(0);
 }
 
-void *handleclient(void *ptr) {
+void sendResponseInt(int fd, char stat, int num) {
+	char msg[20];
+	int len;
+	
+	sprintf(msg, "%c%c%d", stat, SEP_CHAR, num);
+	len = strlen(msg);
+	write(fd, &len, 4);
+	write(fd, msg, len);
+}
+
+void sendResponse(int fd, char stat, char *resp) {
+	char msg[strlen(resp) + 2];
+	int len;
+	
+	sprintf(msg, "%c%c%s", stat, SEP_CHAR, resp);
+	len = strlen(msg);
+	write(fd, &len, 4);
+	write(fd, msg, len);
+}
+
+void *handleClient(void *ptr) {
 	int clientfd = * ((int *) ptr);
+	char inmsg[10];
+	
+	// read opening msg from client
+	int rdlen = read(clientfd, inmsg, 10);
+	
+	if (rdlen != 10) {
+		sendResponseInt(clientfd, STATUS_FAILURE, INVALID_FILE_MODE);
+		return NULL;
+	} else if (inmsg[8] == MODE_UNRESTRCT) {
+		sendResponse(clientfd, STATUS_SUCCESS, "");
+	} else if (inmsg[8] == MODE_EXCLUSIVE) {
+		sendResponse(clientfd, STATUS_SUCCESS, "");
+	} else if (inmsg[8] == MODE_TRANSACTN) {
+		sendResponse(clientfd, STATUS_SUCCESS, "");
+	} else {
+		sendResponseInt(clientfd, STATUS_FAILURE, INVALID_FILE_MODE);
+		return NULL;
+	}
+	
+	// loop to handle any number of requests from client
+	
 	return NULL;
 }
 
-void clientManager(int clientfd, struct sockaddr_in *info) {
-	
-	static int clients[NUM_CLIENTS] = {0};
-	static char inUse[NUM_CLIENTS] = {0};
-	
+void addClient(int clientfd, struct sockaddr_in *info) {
 	pthread_t threadid;
 	char *ipaddr;
-	int i;
 	
-	for (i=0; i<NUM_CLIENTS; i++) {
-		if (inUse[i] == 0) break;
-	}
-	
-	if (i < NUM_CLIENTS) {
-		inUse[i] = 1;
-		clients[i] = clientfd;
-	} else {
-		char *msg = atoi
-	}
-	
+	static int i = 0;
+	static char clientbuf[10];
+	// store client file descriptors in an array to prevent the memory being overwritten
+	// before the worker thread is started and able to copy the value
+	clientbuf[i] = clientfd;
 	ipaddr = inet_ntoa(info->sin_addr);
 	printf("\nConnected to %s, FD: %d\n",ipaddr, clientfd);
-	pthread_create(&threadid, NULL, &handleclient, (void *) &clientfd);
+	pthread_create(&threadid, NULL, &handleClient, (void *) (clientbuf + i));
+	
+	i = (i + 1) % 10;
 }
 
 int main(int argc, char *argv[]) {
@@ -55,9 +87,8 @@ int main(int argc, char *argv[]) {
 	uint infolen;
 	 
 	serversock = socket(AF_INET, SOCK_STREAM, 0);
-    if (serversock < 0) {
-       error("Cannot open socket");
-	}
+    if (serversock < 0) error("Cannot open socket");
+    
 	// allocate serverInfo struct
 	serverInfo = calloc(sizeof(struct sockaddr_in), 1);
 	clientInfo = calloc(sizeof(struct sockaddr_in), 1);
@@ -67,17 +98,18 @@ int main(int argc, char *argv[]) {
     serverInfo->sin_addr.s_addr = INADDR_ANY;
      
     // bind server to socket
-    if (bind(serversock, (struct sockaddr *) serverInfo, sizeof(struct sockaddr_in)) < 0) {
-		error("Failed to bind to socket");
-	}
-			  
+    if (bind(serversock, (struct sockaddr *) serverInfo, sizeof(struct sockaddr_in)) < 0) error("Failed to bind to socket");
+
 	// set up the server socket to listen for client connections
-    listen(serversock, NUM_CLIENTS);
+    if (listen(serversock, NUM_CLIENTS) < 0) error("Unable to listen on socket");
     
     infolen = sizeof(struct sockaddr_in);
     
     while (1) {
 		clientfd = accept(serversock, (struct sockaddr *) clientInfo, &infolen);
-		clientManager(clientfd, clientInfo);
+		
+		if (clientfd < 0) error("Unable to accept client");
+		
+		addClient(clientfd, clientInfo);
 	}
 }
