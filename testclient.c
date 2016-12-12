@@ -54,11 +54,11 @@ char *getResponse(int fd) {
  * If this method returns -1, then the connection was lost, and ERRNO was set
  * appropriately. It will deal with other types of errors internally.
  */
-int sendMessage(int fd, char cmd, char *args) {
-	char msg[strlen(args) + 2];
+int sendMessage(int fd, char cmd, char *args, char opt) {
+	char msg[strlen(args) + 4];
 	int val, len;
 	// create full message to send, and get length
-	sprintf(msg, "%c%c%s", cmd, SEP_CHAR, args);
+	sprintf(msg, "%c%c%s%c%c", cmd, SEP_CHAR, args, SEP_CHAR, opt);
 	len = strlen(msg);
 	// first step is to write the message length to the client (first 4 bytes)
 	val = write(fd, &len, 4);
@@ -96,7 +96,7 @@ int sendMessageInt(int fd, char cmd, int num) {
 	char msg[10];
 	
 	sprintf(msg, "%d", num);
-	return sendMessage(fd, cmd, msg);
+	return sendMessage(fd, cmd, msg, 0);
 }
 
 
@@ -169,9 +169,9 @@ int main(int argc, char *argv[])
 	
 	/** If we're here, we're connected to the server .. w00t!  **/
 	
-	sendMessage(sockfd, MODE_UNRESTRCT, "");
+	sendMessage(sockfd, MODE_UNRESTRCT, "", 0);
 	printf("%s\n", getResponse(sockfd));
-    sendMessage(sockfd, FN_OPEN, "helpme.txt");
+    sendMessage(sockfd, FN_OPEN, "helpme.txt", MODE_WR);
     printf("%s\n", getResponse(sockfd));
     close(sockfd);
     return 0;

@@ -70,6 +70,10 @@
 #  define MODE_EXCLUSIVE '1'
 #  define MODE_TRANSACTN '2'
 
+#  define MODE_RD  'R'
+#  define MODE_WR  'W'
+#  define MODE_RW  'B'
+
 #  define FN_OPEN  'O'
 #  define FN_CLOSE 'C'
 #  define FN_WRITE 'W'
