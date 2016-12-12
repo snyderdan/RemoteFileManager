@@ -9,6 +9,96 @@
 
 #include "libnetfiles.h"
 
+/**
+ * Receives a message from a client. Returns null on error with errno set, and a 
+ * malloc()'ed character string containing all the data sent from the client. 
+ * Remember to free the character pointer returned from this function.
+ * 
+ * If this method returns NULL, then the connection was lost, and ERRNO was set
+ * appropriately. It will deal with other types of errors internally.
+ */
+char *getResponse(int fd) {
+	int val, len;
+	// read length of message
+	val = read(fd, &len, 4);
+	// if val == 0 we got a clean close, if val == -1, an error occurred
+	if (val == 0 || val == -1) {
+		// either way, we should try to close the socket and return, while maintaining errno
+		val = errno;
+		close(fd);
+		errno = val;
+		return NULL;
+	}
+	
+	char *msg = malloc(len+1);
+	// read actual message
+	val = read(fd, msg, len);
+	// if val == 0 we got a clean close, if val == -1, an error occurred
+	if (val == 0 || val == -1) {
+		// either way, we should try to close the socket and return, while maintaining errno
+		val = errno;
+		close(fd);
+		free(msg);
+		errno = val;
+		return NULL;
+	}
+	
+	msg[len] = 0;
+	return msg;
+}
+
+/**
+ * Sends a status character, and a string message to a client specified by fd.
+ * Returns 0 on success, or -1 on error, with errno set
+ * 
+ * If this method returns -1, then the connection was lost, and ERRNO was set
+ * appropriately. It will deal with other types of errors internally.
+ */
+int sendMessage(int fd, char cmd, char *args) {
+	char msg[strlen(args) + 2];
+	int val, len;
+	// create full message to send, and get length
+	sprintf(msg, "%c%c%s", cmd, SEP_CHAR, args);
+	len = strlen(msg);
+	// first step is to write the message length to the client (first 4 bytes)
+	val = write(fd, &len, 4);
+	// if val == 0 we got a clean close, if val == -1, an error occurred
+	if (val == 0 || val == -1) {
+		// either way, we should try to close the socket and return, while maintaining errno
+		val = errno;
+		close(fd);
+		errno = val;
+		return -1;
+	}
+	
+	// now we write the actual message
+	val = write(fd, msg, len);
+	// if val == 0 we got a clean close, if val == -1, an error occurred
+	if (val == 0 || val == -1) {
+		// either way, we should try to close the socket and return, while maintaining errno
+		val = errno;
+		close(fd);
+		errno = val;
+		return -1;
+	}
+	
+	return 0;
+}
+
+/**
+ * Sends a status character, and integer to a client specified by fd.
+ * Returns 0 on success, or -1 on error, with errno set
+ * 
+ * If this method returns -1, then the connection was lost, and ERRNO was set
+ * appropriately. It will deal with other types of errors internally.
+ */
+int sendMessageInt(int fd, char cmd, int num) {
+	char msg[10];
+	
+	sprintf(msg, "%d", num);
+	return sendMessage(fd, cmd, msg);
+}
+
 
 void error(char *msg)
 {
@@ -21,7 +111,6 @@ int main(int argc, char *argv[])
 	// Declare initial vars
     int sockfd = -1;																// file descriptor for our socket
 	int portno = -1;																// server port to connect to
-	int n = -1;																		// utility variable - for monitoring reading/writing from/to the socket
 	char buffer[256];															// char array to store data going to and coming from the server
     struct sockaddr_in serverAddressInfo;						// Super-special secret C struct that holds address info for building our socket
     struct hostent *serverIPAddress;									// Super-special secret C struct that holds info about a machine's address
@@ -80,38 +169,10 @@ int main(int argc, char *argv[])
 	
 	/** If we're here, we're connected to the server .. w00t!  **/
 	
-    printf("Please enter the message: ");
-	
-	// zero out the message buffer
-    bzero(buffer,256);
-
-	// get a message from the client
-    fgets(buffer,255,stdin);
-    
-	// try to write it out to the server
-	n = write(sockfd,buffer,strlen(buffer));
-	
-	// if we couldn't write to the server for some reason, complain and exit
-    if (n < 0)
-	{
-         error("ERROR writing to socket");
-    }
-	
-	// sent message to the server, zero the buffer back out to read the server's response
-	bzero(buffer,256);
-
-	// read a message from the server into the buffer
-    n = read(sockfd,buffer,255);
-	
-	// if we couldn't read from the server for some reason, complain and exit
-    if (n < 0)
-	{
-         error("ERROR reading from socket");
-	}
-
-	// print out server's message
-    printf("%s\n",buffer);
-
-
+	sendMessage(sockfd, MODE_UNRESTRCT, "");
+	printf("%s\n", getResponse(sockfd));
+    sendMessage(sockfd, FN_OPEN, "helpme.txt");
+    printf("%s\n", getResponse(sockfd));
+    close(sockfd);
     return 0;
 }

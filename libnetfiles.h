@@ -66,9 +66,9 @@
 #ifndef __LIBNETFILES_H
 #  define __LIBNETFILES_H
 
-#  define MODE_UNRESTRCT 'R'
-#  define MODE_EXCLUSIVE 'E'
-#  define MODE_TRANSACTN 'T'
+#  define MODE_UNRESTRCT '0'
+#  define MODE_EXCLUSIVE '1'
+#  define MODE_TRANSACTN '2'
 
 #  define FN_OPEN  'O'
 #  define FN_CLOSE 'C'
