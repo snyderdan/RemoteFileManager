@@ -50,13 +50,19 @@
  * may seem like a lousy implementation, and that's because it is. But we 
  * don't have a netseek function, which is even lousier. So this is the only 
  * solution where we don't have to come up with some stupid special case about 
- * "what the fuck happens to the file index once someone rewrite the file"
+ * "what the fuck happens to the file index once someone rewrites the file"
  * 
  * Now you always get from the start of the file, and always write to the start
  * of the file. Unless you completely own the file.
  * 
  * Deal with it.
  */
+
+typedef struct {
+	void *value;
+	void *prev;
+	void *next;
+} LinkedNode;
  
 typedef struct {
 	int fd;
@@ -93,7 +99,7 @@ MultiFile *openFiles = NULL;
  * On success, returns a MultiFile representing the specified file
  * On failure, returns NULL with errno set appropriately
  */
-MultiFile *getFileByName(const char *fname, int flags) {
+MultiFile *getFileByName(const char *fname) {
 	MultiFile *tmp, *cur = openFiles;
 	// loop through each object, checking for fname
 	while (cur != NULL) {
@@ -103,7 +109,7 @@ MultiFile *getFileByName(const char *fname, int flags) {
 	}
 	
 	if (cur == NULL) {
-		// file not yet opened by another client, so open it with what the client asks for
+		// file not yet opened by another client, so open it with r/w permission
 		int fd = open(fname, O_RDWR);
 		if (fd == -1) return NULL;
 		// allocate MultiFile, and initialize values
@@ -309,7 +315,7 @@ int openFile(const char *fname, int flags, int clientfd, char access) {
 	int retfd = -1;
 	// acquire lock 
 	pthread_mutex_lock(&fileLock);
-	file = getFileByName(fname, flags);
+	file = getFileByName(fname);
 	
 	// file cannot be opened for some reason, so return with errno
 	if (file == NULL) goto OPENEND;
@@ -317,6 +323,7 @@ int openFile(const char *fname, int flags, int clientfd, char access) {
 	retfd = file->fd;
 	
 	OPENEND:
+	printFileTree();
 	// return lock, and return file descriptor (or -1 if it was an error)
 	pthread_mutex_unlock(&fileLock);
 	return retfd;
