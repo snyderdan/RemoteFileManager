@@ -94,15 +94,22 @@ int linkedListRemove(LinkedList *list, void *val) {
 	for (i=0; i<list->length; i++) {
 		node = linkedListGet(list, i);
 		if (node->value == val) {
-			if (node->prev != NULL) {
+			if (node->prev == NULL) {
+				// removing the head
+				list->head = getNext(node);
+				if (list->head != NULL) list->head->prev = NULL;
+			} else if (node->next == NULL) {
+				// removing tail
+				list->tail = getPrev(node);
+				if (list->tail != NULL) list->tail->next = NULL;
+			} else {
+				// a middle node
 				getPrev(node)->next = getNext(node);
-			}
-
-			if (node->next != NULL) {
 				getNext(node)->prev = getPrev(node);
 			}
 			
 			list->index = 0;
+			list->cur = getHead(list);
 			list->length--;
 			
 			if (list->length == 0) {
@@ -214,6 +221,27 @@ MultiFile *getFileByName(const char *fname) {
 }
 
 /**
+ * Searches all opened files to get a file by a specific descriptor. Unlike
+ * the getFileByName() method, this method will not allocate the file if it
+ * does not get a matching file descriptor, as it does not know the name
+ * of the file to open.
+ * 
+ * On success, returns a MultiFile representing the specified file
+ * On failure, returns NULL with errno set appropriately
+ */
+MultiFile *getFileByFD(int fd) {
+	MultiFile *file;
+	int i;
+	// loop through each object, checking for fname
+	for (i=0; i<fileList.length; i++) { // go to end of list to get null value when file not found
+		file = getFile(linkedListGet(&fileList, i));
+		if (file->fd == fd) return file;
+	}
+	errno = EBADF;
+	return NULL;
+}
+
+/**
  * Returns 0 if client does not have file open in any way, 1 if the 
  * client has access in the given permission, and -1 if the client has
  * access that differs from the specified permission
@@ -299,6 +327,7 @@ int addOwner(MultiFile *file, int flags, int clientfd, char access) {
 	handle->access = access;
 	handle->fd = clientfd;
 	handle->permission = flags;
+	file->refcount++;
 	linkedListAdd(file->owners, handle);
 	updateAccess(file);	// update access level
 	return 0;
@@ -403,6 +432,29 @@ int openFile(const char *fname, int flags, int clientfd, char access) {
 	// return lock, and return file descriptor (or -1 if it was an error)
 	pthread_mutex_unlock(&fileLock);
 	return retfd;
+}
+
+/**
+ * Close file for a given client. If successful, it will return 0. 
+ * On failure, this method will return -1, and errno will be set appropriately.
+ */
+int closeFile(int clientfd, int fd) {
+	MultiFile *file;
+	int retval = -1;
+	// acquire lock 
+	pthread_mutex_lock(&fileLock);
+	file = getFileByFD(fd);
+
+	// file cannot be opened for some reason, so return with errno
+	if (file == NULL) goto CLOSEND;
+	if (removeOwner(file, clientfd) == -1) goto CLOSEND;
+	retval = 0;
+	
+	CLOSEND:
+	printFileTree();
+	// return lock, and return status
+	pthread_mutex_unlock(&fileLock);
+	return retval;
 }
 
 /****************************************************************************************************
@@ -524,6 +576,7 @@ int convertToStandard(char md) {
 }
 
 void *handleClient(void *ptr) {
+	LinkedList *files;
 	int clientfd = * ((int *) ptr);
 	int msglen, running = 1;
 	char *inmsg, access;
@@ -550,7 +603,7 @@ void *handleClient(void *ptr) {
 	}
 	
 	free(inmsg);
-	
+	files = calloc(sizeof(LinkedList), 1);
 	// loop to handle any number of requests from client
 	while (running) {
 		inmsg = getMessage(clientfd);
@@ -562,14 +615,22 @@ void *handleClient(void *ptr) {
 			msglen = strlen(inmsg);
 			inmsg[msglen - 2] = '\0';
 			int val = openFile(inmsg + 2, convertToStandard(inmsg[msglen-1]), clientfd, access);
-			if (val == -1) sendResponseInt(clientfd, STATUS_FAILURE, errno);
-			else sendResponseInt(clientfd, STATUS_SUCCESS, -val);
+			if (val == -1) {
+				sendResponseInt(clientfd, STATUS_FAILURE, errno);
+			} else {
+				sendResponseInt(clientfd, STATUS_SUCCESS, -val);
+				linkedListAdd(files, getFileByName(inmsg+2));
+			}
 		} else if (inmsg[0] == FN_CLOSE) {
 			// close a specific file
-			msglen = strlen(inmsg);
-			char outmsg[msglen + 30];
-			sprintf(outmsg, "Got: CLOSE '%s' $$$", inmsg);
-			sendResponse(clientfd, STATUS_SUCCESS, outmsg);
+			int fd = -atoi(inmsg + 2);
+			int val = closeFile(clientfd, fd);
+			if (val == -1) {
+				sendResponseInt(clientfd, STATUS_FAILURE, errno);
+			} else {
+				sendResponseInt(clientfd, STATUS_SUCCESS, -fd);
+				linkedListRemove(files, getFileByFD(fd));
+			}
 		} else if (inmsg[0] == FN_READ) {
 			// read data and send to client
 			msglen = strlen(inmsg);
@@ -588,6 +649,13 @@ void *handleClient(void *ptr) {
 	}
 	
 	printf("Closed connection FD: %d\n", clientfd);
+	
+	MultiFile *file;
+	int i;
+	for (i=0; i<files->length; i++) {
+		file = getFile(linkedListGet(files, i));
+		closeFile(clientfd, file->fd);
+	}
 	
 	return NULL;
 }
