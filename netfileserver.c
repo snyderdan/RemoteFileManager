@@ -17,6 +17,115 @@
 
 /****************************************************************************************************
  * 																									*
+ * Generic LinkedList methods and definitions														*
+ * 																									*
+ * Used to keep track of the global list of open files, the owners of each file, and				*
+ * what files each client owns individually. 														*
+ * 																									*
+ ****************************************************************************************************/
+ 
+typedef struct {
+	void *value;
+	void *prev;
+	void *next;
+} LinkedNode;
+
+typedef struct {
+	int length;
+	int index;
+	LinkedNode *cur;
+	LinkedNode *head;
+	LinkedNode *tail;
+} LinkedList;
+
+# define getNext(nd) ((LinkedNode *) nd->next)
+# define getPrev(nd) ((LinkedNode *) nd->prev)
+# define getHead(lst) ((LinkedNode *) lst->head)
+# define getTail(lst) ((LinkedNode *) lst->tail)
+
+/**
+ * Added a value to the end of a linked list
+ */
+void linkedListAdd(LinkedList *list, void *val) {
+	LinkedNode *node = calloc(sizeof(LinkedNode), 1);
+	node->value = val;
+	if (list->head == NULL) {
+		list->head = node;
+		list->tail = node;
+		list->cur = node;
+	} else {
+		getTail(list)->next = node;
+		node->prev = getTail(list);
+		list->tail = node;
+	}
+
+	list->length++;
+}
+
+/**
+ * Gets a link in the list at a specific index
+ */
+LinkedNode *linkedListGet(LinkedList *list, int index) {
+	if (index < 0) return NULL;
+	if (index >= list->length) return NULL;
+
+	while (list->index < index) {
+		list->index++;
+		list->cur = getNext(list->cur);
+	}
+
+	while (list->index > index) {
+		list->index--;
+		list->cur = getPrev(list->cur);
+	}
+	return list->cur;
+}
+
+/**
+ * Removes an object from the linked list. The comparison is by reference,
+ * meaning only the pointer address is checked. Copies will not match.
+ * 
+ * Returns 0 if successfully removed a matching link, 1 otherwise.
+ */
+int linkedListRemove(LinkedList *list, void *val) {
+	LinkedNode *node;
+	int i;
+	
+	for (i=0; i<list->length; i++) {
+		node = linkedListGet(list, i);
+		if (node->value == val) {
+			if (node->prev == NULL) {
+				// removing the head
+				list->head = getNext(node);
+				if (list->head != NULL) list->head->prev = NULL;
+			} else if (node->next == NULL) {
+				// removing tail
+				list->tail = getPrev(node);
+				if (list->tail != NULL) list->tail->next = NULL;
+			} else {
+				// a middle node
+				getPrev(node)->next = getNext(node);
+				getNext(node)->prev = getPrev(node);
+			}
+			
+			list->index = 0;
+			list->cur = getHead(list);
+			list->length--;
+			
+			if (list->length == 0) {
+				list->head = NULL;
+				list->tail = NULL;
+			}
+			free(node);
+			return 0;
+		}
+	}
+	
+	return 1;
+}
+
+/****************************************************************************************************
+ * 																									*
  * File permission management																		*	
  * 																									*
  * Code below provides a mechanism for implementing unrestricted mode,								*
@@ -57,20 +166,14 @@
  * 
  * Deal with it.
  */
-
-typedef struct {
-	void *value;
-	void *prev;
-	void *next;
-} LinkedNode;
  
 typedef struct {
 	int fd;
 	int permission;
 	char access;
-	void *prev;
-	void *next;
 } ClientHandle;
+
+# define getClient(nd) ((ClientHandle *) nd->value)
 
 typedef struct {
 	int fd;
@@ -78,18 +181,13 @@ typedef struct {
 	int write;
 	char access;
 	char *fname;
-	void *prev;
-	void *next;
-	void *owners;
+	LinkedList *owners;
 } MultiFile;
 
-# define getNext(nd) (nd->next)
-# define getPrev(nd) (nd->prev)
-# define getHead(ptr, nd) ptr=nd;while(getPrev(ptr) != NULL) ptr=getPrev(ptr)
-# define getTail(ptr, nd) ptr=nd;while(getNext(ptr) != NULL) ptr=getNext(ptr)
+# define getFile(nd) ((MultiFile *) nd->value)
 
 pthread_mutex_t fileLock;
-MultiFile *openFiles = NULL;
+LinkedList fileList = {0};
 
 /**
  * Checks all open files to see if this file is open by another client.
@@ -100,34 +198,47 @@ MultiFile *openFiles = NULL;
  * On failure, returns NULL with errno set appropriately
  */
 MultiFile *getFileByName(const char *fname) {
-	MultiFile *tmp, *cur = openFiles;
+	LinkedNode *node;
+	MultiFile *file;
+	int fd, i;
 	// loop through each object, checking for fname
-	while (cur != NULL) {
-		// if we find it, break
-		if (strcmp(cur->fname, fname) == 0) break;
-		cur = cur->next;
+	for (i=0; i<fileList.length; i++) { // go to end of list to get null value when file not found
+		node = linkedListGet(&fileList, i);
+		if (strcmp(getFile(node)->fname, fname) == 0) return getFile(node);
 	}
-	
-	if (cur == NULL) {
-		// file not yet opened by another client, so open it with r/w permission
-		int fd = open(fname, O_RDWR);
-		if (fd == -1) return NULL;
-		// allocate MultiFile, and initialize values
-		cur = calloc(sizeof(MultiFile), 1);
-		cur->fd = fd;
-		cur->fname = calloc(strlen(fname), 1);
-		strcpy(cur->fname, fname);
-		// add file to linked list
-		if (openFiles == NULL) {
-			openFiles = cur;
-		} else {
-			getTail(tmp, openFiles);
-			tmp->next = cur;
-			cur->prev = tmp;
-		}
-	}
+	// file not yet opened by another client, so open it with r/w permission
+	fd = open(fname, O_RDWR);
+	if (fd == -1) return NULL;
+	// allocate MultiFile, and initialize values
+	file = calloc(sizeof(MultiFile), 1);
+	file->fd = fd;
+	file->fname = calloc(strlen(fname), 1);
+	strcpy(file->fname, fname);
+	file->owners = calloc(sizeof(LinkedList), 1);
+	// add file to linked list
+	linkedListAdd(&fileList, file);
+	return file;
+}
 
-	return cur;
+/**
+ * Searches all opened files to get a file by a specific descriptor. Unlike
+ * the getFileByName() method, this method will not allocate the file if it
+ * does not get a matching file descriptor, as it does not know the name
+ * of the file to open.
+ * 
+ * On success, returns a MultiFile representing the specified file
+ * On failure, returns NULL with errno set appropriately
+ */
+MultiFile *getFileByFD(int fd) {
+	MultiFile *file;
+	int i;
+	// loop through each object, checking for fname
+	for (i=0; i<fileList.length; i++) { // go to end of list to get null value when file not found
+		file = getFile(linkedListGet(&fileList, i));
+		if (file->fd == fd) return file;
+	}
+	errno = EBADF;
+	return NULL;
 }
 
 /**
@@ -136,15 +247,18 @@ MultiFile *getFileByName(const char *fname) {
  * access that differs from the specified permission
  */
 int hasAccess(MultiFile *file, int clientfd, int permission) {
-	ClientHandle *handle = file->owners;
-	
-	while (handle != NULL) {
-		if (handle->fd == clientfd) {
-			if (handle->permission == permission) return 1;
+	LinkedList *list = file->owners;
+	LinkedNode *node;
+	int i;
+
+	for (i=0; i<list->length; i++) {
+		node = linkedListGet(list, i);
+		if (getClient(node)->fd == clientfd) {
+			if (getClient(node)->permission == permission) return 1;
 			return -1;
 		}
-		handle = getNext(handle);
 	}
+	
 	return 0;
 }
 
@@ -153,14 +267,17 @@ int hasAccess(MultiFile *file, int clientfd, int permission) {
  * Only occurs when a new client is added or removed
  */
 void updateAccess(MultiFile *file) {
-	ClientHandle *handle = file->owners;
-	int write = 0;
+	LinkedList *list = file->owners;
+	LinkedNode *node;
+	ClientHandle *handle;
+	int write = 0, i;
 	char maxAccess = 0;
-	
-	while (handle != NULL) {
+
+	for (i=0; i<list->length; i++) {
+		node = linkedListGet(list, i);
+		handle = getClient(node);
 		if (handle->permission == O_WRONLY || handle->permission == O_RDWR) write = 1;
 		if (handle->access > maxAccess) maxAccess = handle->access;
-		handle = getNext(handle);
 	}
 	
 	file->access = maxAccess;
@@ -175,7 +292,7 @@ void updateAccess(MultiFile *file) {
  */
 int addOwner(MultiFile *file, int flags, int clientfd, char access) {
 	
-	ClientHandle *handle, *tmp;
+	ClientHandle *handle;
 	
 	if (hasAccess(file, clientfd, flags)) {
 		// don't let clients open a file twice
@@ -210,15 +327,8 @@ int addOwner(MultiFile *file, int flags, int clientfd, char access) {
 	handle->access = access;
 	handle->fd = clientfd;
 	handle->permission = flags;
-	if (file->owners == NULL) {
-		// new file, so we are the only owner
-		file->owners = handle;
-	} else {
-		getTail(tmp, file->owners);
-		tmp->next = handle;
-		handle->prev = tmp;
-	}
-	file->refcount++;	// update refcount
+	file->refcount++;
+	linkedListAdd(file->owners, handle);
 	updateAccess(file);	// update access level
 	return 0;
 	
@@ -233,7 +343,9 @@ int addOwner(MultiFile *file, int flags, int clientfd, char access) {
  * have access to the file, errno is set and -1 is returned.
  */
 int removeOwner(MultiFile *file, int clientfd) {
+	LinkedList *owners;
 	ClientHandle *handle;
+	int i;
 	// if they don't have it open, set errno and return
 	if (!hasAccess(file, clientfd, O_RDONLY)) {
 		// if they have a valid reference to the file, then they tried closing multiple times
@@ -241,53 +353,46 @@ int removeOwner(MultiFile *file, int clientfd) {
 		errno = EBADF;
 		return -1;
 	}
+	// first off, remove the client from the list
+	owners = file->owners;
 	
+	for (i=0; i<owners->length; i++) {
+		handle = getClient(linkedListGet(owners, i));
+		if (handle->fd == clientfd) {
+			linkedListRemove(owners, handle);
+			break;
+		}
+	}
+	// free client
+	free(handle);
+	// update refcount
 	file->refcount--;
 	if (file->refcount == 0) {
-		// remove file from linked list
-		if (file->prev != NULL) {
-			((MultiFile *)file->prev)->next = file->next;
-		} else {
-			// this was the head file
-			openFiles = file->next;
-		}
-		if (file->next != NULL) ((MultiFile *)file->next)->prev = file->prev;
-		
+		// if no one is holding the file, close and remove file from linked list
+		linkedListRemove(&fileList, file);
+		close(file->fd);	// close file
 		free(file->owners); // only owned by us, so we don't have to cycle through the tree
 		free(file->fname); 	// free string name
 		free(file); 		// finally, free the file descriptor
-		return 0;
 	}
 	
-	// otherwise, we go through and remove this client
-	handle = file->owners;
-	while (handle->fd != clientfd) handle = getNext(handle);
-	if (handle->prev != NULL) {
-		((ClientHandle *)handle->prev)->next = handle->next;
-	} else {
-		// head of list
-		file->owners = handle->next;
-	}
-	if (handle->next != NULL) ((ClientHandle *)handle->next)->prev = handle->prev;
-	
-	free(handle);
 	return 0;
 }
 
 void printFileTree() {
-	MultiFile *file = openFiles;
+	MultiFile *file;
 	ClientHandle *client;
+	int i, j;
 	
 	printf("\n\nTREE: \n");
-	while (file != NULL) {
+	for (i=0; i<fileList.length; i++) {
+		file = getFile(linkedListGet(&fileList, i));
 		printf("\tFNAME: %s\n\tFD:    %d\n\tMAXAC: %c\n\tWRITE: %d\n\tREFCT: %d\n\tOWNED:\n", file->fname, file->fd, file->access, file->write, file->refcount);
-		client = file->owners;
 		
-		while (client != NULL) {
+		for (j=0; j<file->owners->length; j++) {
+			client = getClient(linkedListGet(file->owners, j));
 			printf("\t\tFD: %d\n\t\tAC: %c\n\t\tRW: %d\n\n", client->fd, client->access, client->permission);
-			client = getNext(client);
 		}
-		file = getNext(file);
 	}
 }
 
@@ -327,6 +432,29 @@ int openFile(const char *fname, int flags, int clientfd, char access) {
 	// return lock, and return file descriptor (or -1 if it was an error)
 	pthread_mutex_unlock(&fileLock);
 	return retfd;
+}
+
+/**
+ * Close file for a given client. If successful, it will return 0. 
+ * On failure, this method will return -1, and errno will be set appropriately.
+ */
+int closeFile(int clientfd, int fd) {
+	MultiFile *file;
+	int retval = -1;
+	// acquire lock 
+	pthread_mutex_lock(&fileLock);
+	file = getFileByFD(fd);
+
+	// file cannot be opened for some reason, so return with errno
+	if (file == NULL) goto CLOSEND;
+	if (removeOwner(file, clientfd) == -1) goto CLOSEND;
+	retval = 0;
+	
+	CLOSEND:
+	printFileTree();
+	// return lock, and return status
+	pthread_mutex_unlock(&fileLock);
+	return retval;
 }
 
 /****************************************************************************************************
@@ -448,6 +576,7 @@ int convertToStandard(char md) {
 }
 
 void *handleClient(void *ptr) {
+	LinkedList *files;
 	int clientfd = * ((int *) ptr);
 	int msglen, running = 1;
 	char *inmsg, access;
@@ -474,7 +603,7 @@ void *handleClient(void *ptr) {
 	}
 	
 	free(inmsg);
-	
+	files = calloc(sizeof(LinkedList), 1);
 	// loop to handle any number of requests from client
 	while (running) {
 		inmsg = getMessage(clientfd);
@@ -486,14 +615,22 @@ void *handleClient(void *ptr) {
 			msglen = strlen(inmsg);
 			inmsg[msglen - 2] = '\0';
 			int val = openFile(inmsg + 2, convertToStandard(inmsg[msglen-1]), clientfd, access);
-			if (val == -1) sendResponseInt(clientfd, STATUS_FAILURE, errno);
-			else sendResponseInt(clientfd, STATUS_SUCCESS, -val);
+			if (val == -1) {
+				sendResponseInt(clientfd, STATUS_FAILURE, errno);
+			} else {
+				sendResponseInt(clientfd, STATUS_SUCCESS, -val);
+				linkedListAdd(files, getFileByName(inmsg+2));
+			}
 		} else if (inmsg[0] == FN_CLOSE) {
 			// close a specific file
-			msglen = strlen(inmsg);
-			char outmsg[msglen + 30];
-			sprintf(outmsg, "Got: CLOSE '%s' $$$", inmsg);
-			sendResponse(clientfd, STATUS_SUCCESS, outmsg);
+			int fd = -atoi(inmsg + 2);
+			int val = closeFile(clientfd, fd);
+			if (val == -1) {
+				sendResponseInt(clientfd, STATUS_FAILURE, errno);
+			} else {
+				sendResponseInt(clientfd, STATUS_SUCCESS, -fd);
+				linkedListRemove(files, getFileByFD(fd));
+			}
 		} else if (inmsg[0] == FN_READ) {
 			// read data and send to client
 			msglen = strlen(inmsg);
@@ -512,6 +649,13 @@ void *handleClient(void *ptr) {
 	}
 	
 	printf("Closed connection FD: %d\n", clientfd);
+	
+	MultiFile *file;
+	int i;
+	for (i=0; i<files->length; i++) {
+		file = getFile(linkedListGet(files, i));
+		closeFile(clientfd, file->fd);
+	}
 	
 	return NULL;
 }
