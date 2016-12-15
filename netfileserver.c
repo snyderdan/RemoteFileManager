@@ -490,6 +490,35 @@ char *readFile(int fd, int clientfd) {
 	return data;
 }
 
+/**
+ * writes data to a file
+ * 
+ * Returns number of bytes written on success
+ * Return -1 on failure, with errno set appropriately
+ */
+int writeFile(int fd, int clientfd, char *buf) {
+	MultiFile *file;
+	
+	int bytesread = -1;
+	
+	pthread_mutex_lock(&fileLock);
+	file = getFileByFD(fd);
+	
+	if (file == NULL) goto WRITEND;
+	
+	if (hasAccess(file, clientfd, O_WRONLY) == 1 || hasAccess(file, clientfd, O_RDWR) == 1) {
+		// go to start of file
+		lseek(file->fd, 0, SEEK_SET);
+		bytesread = write(file->fd, buf, strlen(buf));
+	} else {
+		errno = EACCES;
+	}
+	WRITEND:
+	// free lock and return
+	pthread_mutex_unlock(&fileLock);
+	return bytesread;
+}
+
 /****************************************************************************************************
  * 																									*
  * Client communication helper functions															*	
@@ -639,7 +668,7 @@ void *handleClient(void *ptr) {
 	files = calloc(sizeof(LinkedList), 1);
 	// loop to handle any number of requests from client
 	while (running) {
-		printFileTree();
+		//printFileTree();
 		inmsg = getMessage(clientfd);
 		
 		if (inmsg == NULL) break;
@@ -658,7 +687,7 @@ void *handleClient(void *ptr) {
 		} else if (inmsg[0] == FN_CLOSE) {
 			// close a specific file
 			int fd = -atoi(inmsg + 2);
-			int val = closeFile(clientfd, fd);
+			int val = closeFile(fd, clientfd);
 			if (val == -1) {
 				sendResponseInt(clientfd, STATUS_FAILURE, errno);
 			} else {
@@ -675,10 +704,18 @@ void *handleClient(void *ptr) {
 				sendResponse(clientfd, STATUS_SUCCESS, data);
 			}
 		} else if (inmsg[0] == FN_WRITE) {
+			// write data to file. data is sent in two messages
 			int fd = -atoi(inmsg + 2);
 			free(inmsg);
 			inmsg = getMessage(clientfd);
-			printf("%d %s\n", fd, inmsg);
+			int len = strlen(inmsg);
+			inmsg[len-1] = '\0';
+			int bytes = writeFile(fd, clientfd, inmsg+2);
+			if (bytes == -1) {
+				sendResponseInt(clientfd, STATUS_FAILURE, errno);
+			} else {
+				sendResponseInt(clientfd, STATUS_SUCCESS, bytes);
+			}
 		}
 		
 		free(inmsg);

@@ -13,9 +13,12 @@
 int main(int argc, char *argv[])
 {
 	netserverinit("localhost", MODE_UNRESTRCT);
-	int fd = netopen("test1.txt", MODE_RD);
+	int fd = netopen("test1.txt", MODE_RW);
 	char buf[20];
 	netread(fd, buf, 20);
 	printf(buf);
-	printf("RIGHT ON");
+	buf[0] = 'H';
+	netwrite(fd, buf, 20);
+	netclose(fd);
+	printf("\nRIGHT ON\n");
 }
