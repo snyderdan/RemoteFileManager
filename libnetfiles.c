@@ -12,7 +12,11 @@
 int sockfd = -1;
 struct sockaddr_in serverAddressInfo;						// Super-special secret C struct that holds address info for building our socket
 struct hostent *serverIPAddress;									// Super-special secret C struct that holds info about a machine's address
-portno = 20000;
+
+void error(char *msg) {
+    perror(msg);
+    exit(0);
+}
 
 /**
  * Receives a message from a client. Returns null on error with errno set, and a 
@@ -59,7 +63,7 @@ char *getResponse(int fd) {
  * If this method returns -1, then the connection was lost, and ERRNO was set
  * appropriately. It will deal with other types of errors internally.
  */
-int sendMessage(int fd, char cmd, char *args, char opt) {
+int sendMessage(int fd, char cmd, const char *args, char opt) {
 	char msg[strlen(args) + 4];
 	int val, len;
 	// create full message to send, and get length
@@ -105,6 +109,7 @@ int sendMessageInt(int fd, char cmd, int num) {
 }
 
 int netserverinit(char * hostname, int connectMode){
+	char *message;
 	int status;
 	// look up the IP address that matches up with the name given - the name given might
 	//    BE an IP address, which is fine, and store it in the 'serverIPAddress' struct
@@ -131,7 +136,7 @@ int netserverinit(char * hostname, int connectMode){
     serverAddressInfo.sin_family = AF_INET;
 	
 	// set the remote port .. translate from a 'normal' int to a super-special 'network-port-int'
-	serverAddressInfo.sin_port = htons(portno);
+	serverAddressInfo.sin_port = htons(PORT_NUM);
 
 	// do a raw copy of the bytes that represent the server's IP address in 
 	//   the 'serverIPAddress' struct into our serverIPAddressInfo struct
@@ -156,14 +161,14 @@ int netserverinit(char * hostname, int connectMode){
 	message = getResponse(sockfd);
 	if (message == NULL){
 		return -1;
-		}
-	else if (message[0] == STATUS_SUCCESS){
+	} else if (message[0] == STATUS_SUCCESS){
 		free(message);
-		return 0;}
-	else {
+		return 0;
+	} else {
 		errno = atoi(message + 2);
-		free(message)
-		return -1;}
+		free(message);
+		return -1;
+	}
 	
 	
 }
@@ -180,23 +185,24 @@ int netserverinit(char * hostname, int connectMode){
  *  - 1 byte mode */
  
 int netopen(const char *pathname, int flags){
-
-}
 	int ret;
 	char * message;
 	ret = sendMessage(sockfd, FN_OPEN, pathname, flags);
 	if (ret == -1) {
-		return ret;}
+		return ret;
+	}
 	message = getResponse(sockfd);
 	if (message == NULL){
-		return ret;}
-	else if (message[0] == STATUS_SUCCESS){
-		free(message)
-		return 0;}
-	else {
+		return -1;
+	} else if (message[0] == STATUS_SUCCESS){
+		ret = atoi(message + 2);
+		free(message);
+		return ret;
+	} else {
 		errno = atoi(message + 2);
 		free(message);
-		return -1;}
+		return -1;
+	}
 	
 }	
 
@@ -228,11 +234,12 @@ int netclose(int fd){
 		}
 	else if (message[0] == STATUS_SUCCESS){
 		free(message);
-		return 0;}
-	else {
+		return 0;
+	} else {
 		errno = atoi(message + 2);
-		free(message)
-		return -1;}
+		free(message);
+		return -1;
+	}
 }	
 
  /* Read:
@@ -255,7 +262,7 @@ ssize_t netread(int fileDesc, void *buf, size_t nbyte){
 	int status;
 	char * message;
 	int len;
-	status = sendMessageInt(sockfd, FN_READ, fileDesc, );
+	status = sendMessageInt(sockfd, FN_READ, fileDesc);
 	if (status == -1){
 		return status;}
 	message = getResponse(sockfd);
@@ -263,21 +270,22 @@ ssize_t netread(int fileDesc, void *buf, size_t nbyte){
 		return -1;}
 	else if (message[0] == STATUS_SUCCESS){
 		len = strlen(message + 2);
-			if (len >= nbyte){
-				strncpy(buf, message + 2, len-2);
-				buf[nbyte -1] = '\0'
-				free(message);
-				return nbyte;}
-			else {
-				strcpy(buf, message + 2);
-				buf[len] = '\0'
-				free(message);
-				return len;}
-			}
-	else {
+		if (len >= nbyte){
+			strncpy(buf, message + 2, len-2);
+			((char *) buf)[nbyte -1] = '\0';
+			free(message);
+			return nbyte;
+		} else {
+			strcpy(buf, message + 2);
+			((char *) buf)[len] = '\0';
+			free(message);
+			return len;
+		}
+	} else {
 		errno = atoi(message + 2);
 		free(message);
-		return -1;} 
+		return -1;
+	} 
 }
 
 
@@ -329,14 +337,3 @@ ssize_t netwrite(int fileDesc, const void *buf, size_t nbyte){
 		return -1;} 
 		
 }
-
-
-
-
-
-void error(char *msg)
-{
-    perror(msg);
-    exit(0);
-}
-

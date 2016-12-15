@@ -167,7 +167,7 @@ int linkedListRemove(LinkedList *list, void *val) {
  * Deal with it.
  */
  
-typedef struct {
+typedef struct s_ClientHandle {
 	int fd;
 	int permission;
 	char access;
@@ -175,7 +175,7 @@ typedef struct {
 
 # define getClient(nd) ((ClientHandle *) nd->value)
 
-typedef struct {
+typedef struct s_MultiFile {
 	int fd;
 	int refcount;
 	int write;
@@ -428,7 +428,7 @@ int openFile(const char *fname, int flags, int clientfd, char access) {
 	retfd = file->fd;
 	
 	OPENEND:
-	printFileTree();
+	//printFileTree();
 	// return lock, and return file descriptor (or -1 if it was an error)
 	pthread_mutex_unlock(&fileLock);
 	return retfd;
@@ -438,7 +438,7 @@ int openFile(const char *fname, int flags, int clientfd, char access) {
  * Close file for a given client. If successful, it will return 0. 
  * On failure, this method will return -1, and errno will be set appropriately.
  */
-int closeFile(int clientfd, int fd) {
+int closeFile(int fd, int clientfd) {
 	MultiFile *file;
 	int retval = -1;
 	// acquire lock 
@@ -451,10 +451,43 @@ int closeFile(int clientfd, int fd) {
 	retval = 0;
 	
 	CLOSEND:
-	printFileTree();
+	//printFileTree();
 	// return lock, and return status
 	pthread_mutex_unlock(&fileLock);
 	return retval;
+}
+
+/**
+ * Reads data from file 
+ * 
+ * Returns malloc()'ed string with file data on success
+ * Return NULL on failure with errno set accordingly
+ */
+char *readFile(int fd, int clientfd) {
+	MultiFile *file;
+	char *data = NULL;
+	
+	int bytesread = -1;
+	
+	pthread_mutex_lock(&fileLock);
+	file = getFileByFD(fd);
+	
+	if (file == NULL) goto READEND;
+	
+	if (hasAccess(file, clientfd, O_RDONLY) == 1 || hasAccess(file, clientfd, O_RDWR) == 1) {
+		// go to end of file to get length
+		int len = lseek(file->fd, 0, SEEK_END);
+		// go to start of file
+		lseek(file->fd, 0, SEEK_SET);
+		data = malloc(len);
+		read(file->fd, data, len);
+	} else {
+		errno = EACCES;
+	}
+	READEND:
+	// free lock and return
+	pthread_mutex_unlock(&fileLock);
+	return data;
 }
 
 /****************************************************************************************************
@@ -606,6 +639,7 @@ void *handleClient(void *ptr) {
 	files = calloc(sizeof(LinkedList), 1);
 	// loop to handle any number of requests from client
 	while (running) {
+		printFileTree();
 		inmsg = getMessage(clientfd);
 		
 		if (inmsg == NULL) break;
@@ -633,16 +667,18 @@ void *handleClient(void *ptr) {
 			}
 		} else if (inmsg[0] == FN_READ) {
 			// read data and send to client
-			msglen = strlen(inmsg);
-			char outmsg[msglen + 230];
-			sprintf(outmsg, "Got: READ '%s' $$$", inmsg);
-			sendResponse(clientfd, STATUS_SUCCESS, outmsg);
+			int fd = -atoi(inmsg + 2);
+			char *data = readFile(fd, clientfd);
+			if (data == NULL) {
+				sendResponseInt(clientfd, STATUS_FAILURE, errno);
+			} else {
+				sendResponse(clientfd, STATUS_SUCCESS, data);
+			}
 		} else if (inmsg[0] == FN_WRITE) {
-			// write client data to file
-			msglen = strlen(inmsg);
-			char outmsg[msglen + 30];
-			sprintf(outmsg, "Got: WRITE '%s' $$$", inmsg);
-			sendResponse(clientfd, STATUS_SUCCESS, outmsg);
+			int fd = -atoi(inmsg + 2);
+			free(inmsg);
+			inmsg = getMessage(clientfd);
+			printf("%d %s\n", fd, inmsg);
 		}
 		
 		free(inmsg);
